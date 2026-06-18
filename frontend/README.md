@@ -1,73 +1,42 @@
-# React + TypeScript + Vite
+# FAERS Agent — Streamlit frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A Python (Streamlit) rewrite of the original React/TypeScript frontend. It talks
+to the same FastAPI backend over HTTP, so nothing on the backend changes.
 
-Currently, two official plugins are available:
+## Layout
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+frontend/
+├── app.py                  # entry point: sidebar + view router (was App/Layout/Sidebar)
+├── requirements.txt
+└── faers_ui/
+    ├── api.py              # HTTP client for FastAPI    (was services/api.ts)
+    ├── state.py            # session state + domain types (was store/appStore.ts)
+    └── views/
+        ├── chat.py         # chat view        (was components/ChatView.tsx)
+        ├── agent_builder.py# agent builder    (was pages/AgentBuilder.tsx)
+        ├── tools.py        # tools page       (was pages/ToolsPage.tsx)
+        └── settings.py     # settings page    (was pages/SettingsPage.tsx)
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Run
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+# 1. install deps
+pip install -r frontend/requirements.txt
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# 2. start the backend (separate terminal, from repo root)
+uvicorn backend.main:app --reload --port 8000
+
+# 3. start the frontend
+streamlit run frontend/app.py
 ```
+
+The UI opens at http://localhost:8501.
+
+## Configuration
+
+- `FAERS_API_URL` — backend base URL (default `http://localhost:8000`).
+
+If the backend isn't running, chat falls back to an offline placeholder so the
+UI stays usable during development — same behavior as the old React app.
