@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import streamlit as st
 
-from faers_ui import state
-from faers_ui.views import agent_builder, chat, settings, tools
+from ui import state
+from ui.views import agent_builder, chat, settings, tools
 
 st.set_page_config(page_title="FAERS Agent", page_icon="📊", layout="wide")
 

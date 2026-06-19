@@ -9,47 +9,43 @@ from __future__ import annotations
 
 import time
 import uuid
-from dataclasses import dataclass, field
 
 import streamlit as st
+from pydantic import BaseModel, Field
 
 # ─── Domain types ─────────────────────────────────────────
 
 
-@dataclass
-class Message:
+class Message(BaseModel):
     role: str  # "user" | "assistant"
     content: str
-    id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    created_at: float = field(default_factory=time.time)
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    created_at: float = Field(default_factory=time.time)
 
 
-@dataclass
-class Chat:
+class Chat(BaseModel):
     title: str = "New chat"
     agent_id: str | None = None
-    messages: list[Message] = field(default_factory=list)
-    id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    created_at: float = field(default_factory=time.time)
+    messages: list[Message] = Field(default_factory=list)
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    created_at: float = Field(default_factory=time.time)
 
 
-@dataclass
-class Agent:
+class Agent(BaseModel):
     name: str
     model: str
     system_prompt: str
-    tools: list[str] = field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
     memory_enabled: bool = True
     human_in_loop: bool = False
-    id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
 
 
-@dataclass
-class Tool:
+class Tool(BaseModel):
     name: str
     description: str
     builtin: bool = False
-    id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
 
 
 # ─── Seed data ────────────────────────────────────────────
