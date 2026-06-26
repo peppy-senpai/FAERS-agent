@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .crypto import decrypt_secret, encrypt_secret
 from .db import db_url, get_session
 from .models import AgentConfig
 from .tools import fetch_records
@@ -51,8 +52,14 @@ def _to_dict(row: AgentConfig) -> dict[str, Any]:
 
 
 def save_agent(data: dict[str, Any]) -> dict[str, Any]:
-    """Insert a new agent or update an existing one (upsert by id)."""
+    """Insert a new agent or update an existing one (upsert by id).
+
+    The API key is encrypted at rest (Argon2id-derived key + Fernet) before it
+    ever reaches Postgres; see :mod:`backend.crypto`.
+    """
     fields = {k: data[k] for k in _FIELDS if k in data}
+    if fields.get("api_key"):
+        fields["api_key"] = encrypt_secret(fields["api_key"])
     with get_session() as session:
         row = session.get(AgentConfig, fields["id"]) if fields.get("id") else None
         if row is None:
@@ -88,6 +95,19 @@ def list_agents() -> list[dict[str, Any]]:
             if value is not None and not isinstance(value, str):
                 row[key] = value.isoformat()
     return result.rows
+
+
+def get_api_key(agent_id: str) -> str:
+    """Return the decrypted API key for an agent (for runtime use only).
+
+    Never expose this over the API; it's for the agent runtime to authenticate
+    with the model provider.
+    """
+    with get_session() as session:
+        row = session.get(AgentConfig, agent_id)
+        if row is None or not row.api_key:
+            return ""
+        return decrypt_secret(row.api_key)
 
 
 def delete_agent(agent_id: str) -> bool:
