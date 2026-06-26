@@ -1,7 +1,7 @@
 """Application state, backed by st.session_state.
 
 Python port of frontend/src/store/appStore.ts. Where the React app used a
-persisted Zustand store, we use Streamlit's per-session state. Chats, agents
+persisted Zustand store, we use Streamlit's per-session state. Projects, agents
 and tools live for the life of the browser session.
 """
 
@@ -23,19 +23,32 @@ class Message(BaseModel):
     created_at: float = Field(default_factory=time.time)
 
 
-class Chat(BaseModel):
-    title: str = "New chat"
+class Project(BaseModel):
+    title: str = "New project"
     agent_id: str | None = None
     messages: list[Message] = Field(default_factory=list)
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     created_at: float = Field(default_factory=time.time)
 
 
+class KnowledgeStore(BaseModel):
+    """Vector storage configuration for an agent's knowledge base."""
+
+    store_type: str = "none"  # none | local | cloud
+    location: str = ""  # local path or cloud connection URL
+    files: list[str] = Field(default_factory=list)  # uploaded source file names
+
+
 class Agent(BaseModel):
     name: str
     model: str
+    model_source: str = "local"  # local | api
+    provider: str = ""  # langchain init_chat_model provider, when model_source == "api"
+    model_url: str = ""  # base URL of the online API, when model_source == "api"
+    api_key: str = ""  # credential for the online API
     system_prompt: str
     tools: list[str] = Field(default_factory=list)
+    knowledge_store: KnowledgeStore = Field(default_factory=KnowledgeStore)
     memory_enabled: bool = True
     human_in_loop: bool = False
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
@@ -52,11 +65,36 @@ class Tool(BaseModel):
 
 MODELS = ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
 
+# Chat-model provider wrappers LangChain's ``init_chat_model`` supports (which
+# LangGraph builds on). Shown in the Agent Builder when wiring an online API.
+MODEL_PROVIDERS = [
+    "openai",
+    "anthropic",
+    "azure_openai",
+    "azure_ai",
+    "google_vertexai",
+    "google_genai",
+    "google_anthropic_vertex",
+    "bedrock",
+    "bedrock_converse",
+    "cohere",
+    "fireworks",
+    "together",
+    "mistralai",
+    "huggingface",
+    "groq",
+    "ollama",
+    "deepseek",
+    "ibm",
+    "nvidia",
+    "xai",
+    "perplexity",
+]
+
 
 def _builtin_tools() -> list[Tool]:
     """FAERS-oriented tools the agents can call.
 
-    These mirror the backend tool layer exposed over the local FAERS database.
     Stable ids match the original frontend so backend calls line up.
     """
     return [
@@ -111,42 +149,42 @@ def init_state() -> None:
     ss = st.session_state
     if "initialized" in ss:
         return
-    ss.chats = []  # list[Chat]
+    ss.projects = []  # list[Project]
     ss.agents = [_default_agent()]
     ss.tools = _builtin_tools()
-    ss.active_chat_id = None
-    ss.view = "chat"  # chat | agents | tools | settings
+    ss.active_project_id = None
+    ss.view = "projects"  # projects | agents | tools | settings
     ss.theme = "light"
     ss.initialized = True
 
 
-# ─── Chat actions ─────────────────────────────────────────
+# ─── Project actions ──────────────────────────────────────
 
 
-def create_chat(agent_id: str | None = None) -> str:
+def create_project(agent_id: str | None = None) -> str:
     ss = st.session_state
     default_agent = ss.agents[0].id if ss.agents else None
-    chat = Chat(agent_id=agent_id or default_agent)
-    ss.chats.insert(0, chat)
-    ss.active_chat_id = chat.id
-    return chat.id
+    project = Project(agent_id=agent_id or default_agent)
+    ss.projects.insert(0, project)
+    ss.active_project_id = project.id
+    return project.id
 
 
-def delete_chat(chat_id: str) -> None:
+def delete_project(project_id: str) -> None:
     ss = st.session_state
-    ss.chats = [c for c in ss.chats if c.id != chat_id]
-    if ss.active_chat_id == chat_id:
-        ss.active_chat_id = ss.chats[0].id if ss.chats else None
+    ss.projects = [p for p in ss.projects if p.id != project_id]
+    if ss.active_project_id == project_id:
+        ss.active_project_id = ss.projects[0].id if ss.projects else None
 
 
-def set_active_chat(chat_id: str | None) -> None:
-    st.session_state.active_chat_id = chat_id
+def set_active_project(project_id: str | None) -> None:
+    st.session_state.active_project_id = project_id
 
 
-def get_chat(chat_id: str | None) -> Chat | None:
-    if chat_id is None:
+def get_project(project_id: str | None) -> Project | None:
+    if project_id is None:
         return None
-    return next((c for c in st.session_state.chats if c.id == chat_id), None)
+    return next((p for p in st.session_state.projects if p.id == project_id), None)
 
 
 def get_agent(agent_id: str | None) -> Agent | None:
@@ -155,23 +193,23 @@ def get_agent(agent_id: str | None) -> Agent | None:
     return found or (agents[0] if agents else None)
 
 
-def add_message(chat_id: str, role: str, content: str) -> str:
-    """Append a message; the first user message becomes the chat title."""
-    chat = get_chat(chat_id)
-    if chat is None:
+def add_message(project_id: str, role: str, content: str) -> str:
+    """Append a message; the first user message becomes the project title."""
+    project = get_project(project_id)
+    if project is None:
         return ""
-    if not chat.messages and role == "user":
-        chat.title = content[:40]
+    if not project.messages and role == "user":
+        project.title = content[:40]
     msg = Message(role=role, content=content)
-    chat.messages.append(msg)
+    project.messages.append(msg)
     return msg.id
 
 
-def append_to_message(chat_id: str, message_id: str, chunk: str) -> None:
-    chat = get_chat(chat_id)
-    if chat is None:
+def append_to_message(project_id: str, message_id: str, chunk: str) -> None:
+    project = get_project(project_id)
+    if project is None:
         return
-    for m in chat.messages:
+    for m in project.messages:
         if m.id == message_id:
             m.content += chunk
             return

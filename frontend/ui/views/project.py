@@ -1,4 +1,4 @@
-"""Chat view — port of frontend/src/components/ChatView.tsx."""
+"""Project view — port of frontend/src/components/ChatView.tsx."""
 
 from __future__ import annotations
 
@@ -17,27 +17,27 @@ def _offline_reply(text: str, agent_name: str) -> str:
 
 
 def render() -> None:
-    chat = state.get_chat(st.session_state.active_chat_id)
+    project = state.get_project(st.session_state.active_project_id)
 
-    if chat is None:
+    if project is None:
         st.markdown(
             "<div style='text-align:center;padding-top:6rem;color:#888'>"
-            "<h3>No chat selected</h3>"
-            "<p>Start a new chat from the sidebar to talk to a FAERS agent.</p>"
+            "<h3>No project selected</h3>"
+            "<p>Start a new project from the sidebar to talk to a FAERS agent.</p>"
             "</div>",
             unsafe_allow_html=True,
         )
         return
 
-    agent = state.get_agent(chat.agent_id)
+    agent = state.get_agent(project.agent_id)
 
     # Header
-    st.subheader(chat.title)
+    st.subheader(project.title)
     st.caption(f"{agent.name} · {agent.model}" if agent else "No agent")
     st.divider()
 
     # Messages
-    if not chat.messages:
+    if not project.messages:
         st.markdown(
             "<div style='text-align:center;padding-top:3rem;color:#888'>"
             "Ask about a drug's adverse-event signals, e.g.<br>"
@@ -46,7 +46,7 @@ def render() -> None:
             unsafe_allow_html=True,
         )
 
-    for m in chat.messages:
+    for m in project.messages:
         avatar = "🧑" if m.role == "user" else "🤖"
         with st.chat_message(m.role, avatar=avatar):
             st.markdown(m.content or "…")
@@ -60,19 +60,19 @@ def render() -> None:
     if not text:
         return
 
-    state.add_message(chat.id, "user", text)
+    state.add_message(project.id, "user", text)
     with st.chat_message("user", avatar="🧑"):
         st.markdown(text)
 
     with st.chat_message("assistant", avatar="🤖"):
         with st.spinner("Thinking…"):
             try:
-                data = api.send_message(text, chat.id)
+                data = api.send_message(text, project.id)
                 reply = data.get("response") or str(data)
             except requests.RequestException:
                 reply = _offline_reply(text, agent.name if agent else "the agent")
         st.markdown(reply)
 
-    state.add_message(chat.id, "assistant", reply)
+    state.add_message(project.id, "assistant", reply)
     # Rerun so the sidebar title (first message) and history refresh.
     st.rerun()

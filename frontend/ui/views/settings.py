@@ -36,7 +36,7 @@ def render() -> None:
         f"- **Status:** {status}"
     )
     st.caption(
-        "The FastAPI backend powers chat and FAERS tool calls. Chats fall back "
+        "The FastAPI backend powers chat and FAERS tool calls. Projects fall back "
         "to an offline placeholder when it isn't reachable. Override the URL with "
         "the FAERS_API_URL environment variable."
     )

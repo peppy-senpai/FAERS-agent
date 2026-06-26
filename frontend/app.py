@@ -10,7 +10,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ui import state
-from ui.views import agent_builder, chat, settings, tools
+from ui.views import agent_builder, project, settings, tools
 
 st.set_page_config(page_title="FAERS Agent", page_icon="📊", layout="wide")
 
@@ -23,15 +23,15 @@ def _sidebar() -> None:
         st.markdown("### 📊 FAERS Agent")
         st.caption("Safety signal studio")
 
-        # New chat
-        if st.button("➕  New Chat", use_container_width=True, type="primary"):
-            state.create_chat()
-            st.session_state.view = "chat"
+        # New project
+        if st.button("➕  New Project", use_container_width=True, type="primary"):
+            state.create_project()
+            st.session_state.view = "projects"
             st.rerun()
 
         # Nav
         nav = {
-            "agents": "🤖  Add Agent",
+            "agents": "🤖  Agents",
             "tools": "🔧  Add Tools",
             "settings": "⚙️  Settings",
         }
@@ -42,26 +42,29 @@ def _sidebar() -> None:
                 st.rerun()
 
         st.divider()
-        st.markdown("**Chat history**")
+        st.markdown("**Projects**")
 
-        chats = st.session_state.chats
-        if not chats:
-            st.caption("No chats yet. Start a new one.")
+        projects = st.session_state.projects
+        if not projects:
+            st.caption("No projects yet. Start a new one.")
 
-        for c in chats:
-            active = st.session_state.active_chat_id == c.id and st.session_state.view == "chat"
+        for p in projects:
+            active = (
+                st.session_state.active_project_id == p.id
+                and st.session_state.view == "projects"
+            )
             col_open, col_del = st.columns([5, 1])
             if col_open.button(
-                f"💬  {c.title}",
-                key=f"open_{c.id}",
+                f"💬  {p.title}",
+                key=f"open_{p.id}",
                 use_container_width=True,
                 type="primary" if active else "secondary",
             ):
-                state.set_active_chat(c.id)
-                st.session_state.view = "chat"
+                state.set_active_project(p.id)
+                st.session_state.view = "projects"
                 st.rerun()
-            if col_del.button("🗑", key=f"delchat_{c.id}", help="Delete chat"):
-                state.delete_chat(c.id)
+            if col_del.button("🗑", key=f"delproject_{p.id}", help="Delete project"):
+                state.delete_project(p.id)
                 st.rerun()
 
 
@@ -76,7 +79,7 @@ def main() -> None:
     elif view == "settings":
         settings.render()
     else:
-        chat.render()
+        project.render()
 
 
 main()

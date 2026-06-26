@@ -15,10 +15,13 @@ import asyncio
 import math
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
+
+from . import agent_repo
 
 app = FastAPI(title="FAERS Agent API", version="0.1.0")
 
@@ -46,6 +49,29 @@ class AgentConfig(BaseModel):
     system_prompt: str = ""
     memory_enabled: bool = True
     human_in_loop: bool = False
+    id: str | None = None
+    model_source: str = "local"  # local | api
+    provider: str = ""  # langchain provider when model_source == "api"
+    model_url: str = ""  # base URL when model_source == "api"
+    api_key: str = ""  # credential when model_source == "api"
+    knowledge_store: dict = Field(default_factory=dict)
+
+    def to_row(self) -> dict:
+        """Map the API payload to ``agent_config`` table columns."""
+        return {
+            "id": self.id,
+            "name": self.agent_name,
+            "model": self.model,
+            "model_source": self.model_source,
+            "provider": self.provider,
+            "model_url": self.model_url,
+            "api_key": self.api_key,
+            "system_prompt": self.system_prompt,
+            "tools": self.tools,
+            "knowledge_store": self.knowledge_store,
+            "memory_enabled": self.memory_enabled,
+            "human_in_loop": self.human_in_loop,
+        }
 
 
 class ChatRequest(BaseModel):
@@ -86,18 +112,38 @@ async def health_check():
 
 @app.post("/agent/create")
 async def create_agent(config: AgentConfig):
-    """Register an agent configuration.
+    """Register an agent configuration and persist it to the database.
 
-    Placeholder: stores the config in memory. The real implementation would
-    build a LangGraph agent bound to the requested tools/model.
+    Upserts a row in ``agent_config``. Building the actual LangGraph runtime
+    from this config is still a placeholder.
     """
     _AGENTS[config.agent_name] = config
-    return {
-        "status": "created",
-        "agent_name": config.agent_name,
-        "model": config.model,
-        "tools": config.tools,
-    }
+    try:
+        saved = agent_repo.save_agent(config.to_row())
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+    return {"status": "created", "agent": saved}
+
+
+@app.get("/agents")
+async def list_agents():
+    """Return all agents saved in the database, newest first."""
+    try:
+        return {"agents": agent_repo.list_agents()}
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+
+
+@app.delete("/agents/{agent_id}")
+async def delete_agent(agent_id: str):
+    """Delete an agent by id."""
+    try:
+        removed = agent_repo.delete_agent(agent_id)
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {"status": "deleted", "id": agent_id}
 
 
 @app.post("/agent/chat")

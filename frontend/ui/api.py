@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Callable, Iterator
 
 import requests
@@ -36,6 +36,12 @@ class AgentConfig:
     system_prompt: str
     memory_enabled: bool
     human_in_loop: bool
+    id: str | None = None  # reuse the frontend agent id as the DB primary key
+    model_source: str = "local"  # local | api
+    provider: str = ""  # langchain provider when model_source == "api"
+    model_url: str = ""  # base URL when model_source == "api"
+    api_key: str = ""  # credential when model_source == "api"
+    knowledge_store: dict = field(default_factory=dict)
 
 
 # ─── Agent API calls ──────────────────────────────────────
@@ -48,6 +54,20 @@ def create_agent(config: AgentConfig, timeout: float = 10.0) -> dict:
         json=asdict(config),
         timeout=timeout,
     )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def list_agents(timeout: float = 10.0) -> list[dict]:
+    """Fetch all agents saved in the backend database, newest first."""
+    resp = requests.get(f"{base_url()}/agents", timeout=timeout)
+    resp.raise_for_status()
+    return resp.json().get("agents", [])
+
+
+def delete_agent(agent_id: str, timeout: float = 10.0) -> dict:
+    """Delete an agent from the backend database by id."""
+    resp = requests.delete(f"{base_url()}/agents/{agent_id}", timeout=timeout)
     resp.raise_for_status()
     return resp.json()
 

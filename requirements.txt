@@ -6,6 +6,9 @@ httpx
 pydantic>=2.13.4
 pydantic-settings>=2.14.1
 SQLAlchemy
+# Postgres driver (SQLAlchemy "postgresql+psycopg://" URLs) for the
+# agent-config database. The [binary] extra ships prebuilt wheels.
+psycopg[binary]
 pypdf
 beautifulsoup4
 charset-normalizer
