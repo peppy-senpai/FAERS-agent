@@ -69,9 +69,18 @@ def _render_add_agent() -> None:
             key="ab_model_source",
         )
         if model_source == "Local model":
-            model = st.selectbox("Local model", state.MODELS, index=0, key="ab_model")
+            model_url = st.text_input(
+                "Local URL",
+                placeholder="http://localhost:11434",
+                help="URL of the local model server (e.g. Ollama, LM Studio).",
+                key="ab_local_url",
+            )
+            model = st.text_input(
+                "Model",
+                placeholder="llama3",
+                key="ab_local_model",
+            )
             provider = ""
-            model_url = ""
             api_key = ""
         else:
             provider = st.selectbox(
@@ -95,6 +104,7 @@ def _render_add_agent() -> None:
                 "API key",
                 type="password",
                 placeholder="sk-…",
+                help="Encrypted at rest. Never shown again after saving.",
                 key="ab_api_key",
             )
 
@@ -146,6 +156,13 @@ def _render_add_agent() -> None:
     if st.button("Create agent", type="primary"):
         if not name.strip():
             st.error("Agent name is required.")
+            return
+        if not model.strip():
+            st.error("Model is required — enter the model name in the Model tab.")
+            return
+        if not model_url.strip():
+            url_label = "Local URL" if model_source == "Local model" else "Base URL"
+            st.error(f"{url_label} is required — set it in the Model tab.")
             return
 
         store_type = "local" if store_choice == "Local database" else "cloud"
