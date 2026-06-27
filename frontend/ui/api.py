@@ -41,6 +41,7 @@ class AgentConfig:
     provider: str = ""  # langchain provider when model_source == "api"
     model_url: str = ""  # base URL when model_source == "api"
     api_key: str = ""  # credential when model_source == "api"
+    structured_output: dict | None = None  # {field: description} or None
     knowledge_store: dict = field(default_factory=dict)
 
 

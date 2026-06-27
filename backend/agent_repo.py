@@ -23,6 +23,7 @@ _FIELDS = (
     "model_url",
     "api_key",
     "system_prompt",
+    "structured_output",
     "tools",
     "knowledge_store",
     "memory_enabled",
@@ -42,6 +43,7 @@ def _to_dict(row: AgentConfig) -> dict[str, Any]:
         # api_key is intentionally NOT returned — only a flag that one is set.
         "has_api_key": bool(row.api_key),
         "system_prompt": row.system_prompt,
+        "structured_output": row.structured_output,
         "tools": row.tools,
         "knowledge_store": row.knowledge_store,
         "memory_enabled": row.memory_enabled,
@@ -60,6 +62,10 @@ def save_agent(data: dict[str, Any]) -> dict[str, Any]:
     fields = {k: data[k] for k in _FIELDS if k in data}
     if fields.get("api_key"):
         fields["api_key"] = encrypt_secret(fields["api_key"])
+    else:
+        # Blank key: don't write it, so editing an agent without re-entering the
+        # key preserves the existing encrypted one (and create uses the default).
+        fields.pop("api_key", None)
     with get_session() as session:
         row = session.get(AgentConfig, fields["id"]) if fields.get("id") else None
         if row is None:

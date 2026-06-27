@@ -47,6 +47,9 @@ class Agent(BaseModel):
     model_url: str = ""  # base URL of the online API, when model_source == "api"
     api_key: str = ""  # credential for the online API
     system_prompt: str
+    # Optional structured-output spec: {field_name: value_description}. None when
+    # the agent returns free-form text.
+    structured_output: dict | None = None
     tools: list[str] = Field(default_factory=list)
     knowledge_store: KnowledgeStore = Field(default_factory=KnowledgeStore)
     memory_enabled: bool = True

@@ -54,6 +54,7 @@ class AgentConfig(BaseModel):
     provider: str = ""  # langchain provider when model_source == "api"
     model_url: str = ""  # base URL when model_source == "api"
     api_key: str = ""  # credential when model_source == "api"
+    structured_output: dict | None = None  # {field: description} or None
     knowledge_store: dict = Field(default_factory=dict)
 
     def to_row(self) -> dict:
@@ -67,6 +68,7 @@ class AgentConfig(BaseModel):
             "model_url": self.model_url,
             "api_key": self.api_key,
             "system_prompt": self.system_prompt,
+            "structured_output": self.structured_output,
             "tools": self.tools,
             "knowledge_store": self.knowledge_store,
             "memory_enabled": self.memory_enabled,
