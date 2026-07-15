@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import agent_repo
+from .python_files.make_python_agent import write_agent_variable
 
 app = FastAPI(title="FAERS Agent API", version="0.1.0")
 
@@ -122,9 +123,12 @@ async def create_agent(config: AgentConfig):
     _AGENTS[config.agent_name] = config
     try:
         saved = agent_repo.save_agent(config.to_row())
+        agent_variable = write_agent_variable(saved)
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
-    return {"status": "created", "agent": saved}
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Agent file error: {exc}") from exc
+    return {"status": "created", "agent": saved, "agent_variable": agent_variable}
 
 
 @app.get("/agents")

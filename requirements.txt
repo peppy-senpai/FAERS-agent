@@ -6,6 +6,12 @@ httpx
 pydantic>=2.13.4
 pydantic-settings>=2.14.1
 SQLAlchemy
+# Agent runtime + the @tool decorator (langchain_core, pulled in transitively)
+# used to expose backend/tools/* as agent-callable tools.
+langgraph
+# langchain umbrella package — provides init_chat_model, used to build an
+# agent's chat model from its saved provider/model.
+langchain
 # Postgres driver (SQLAlchemy "postgresql+psycopg://" URLs) for the
 # agent-config database. The [binary] extra ships prebuilt wheels.
 psycopg[binary]

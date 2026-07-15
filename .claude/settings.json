@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe -m py_compile frontend/ui/views/agent_builder.py frontend/ui/state.py)",
+      "Bash(.venv/Scripts/python.exe -m py_compile frontend/ui/views/tools.py frontend/ui/views/agent_builder.py)",
+      "Bash(.venv/Scripts/python.exe -)",
+      "Bash(.venv/Scripts/python.exe -m pip install langchain)",
+      "Bash(.venv/Scripts/python.exe -c \"from langchain.chat_models import init_chat_model; print\\('init_chat_model OK'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(PYTHONPATH=. .venv/Scripts/python.exe -c ' *)"
+    ]
+  }
+}

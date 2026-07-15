@@ -59,7 +59,10 @@ class Agent(BaseModel):
 
 class Tool(BaseModel):
     name: str
-    description: str
+    description: str  # short one-liner, shown in lists and the selection chip
+    # Full multi-level description (mirrors the tool function's docstring) shown
+    # on hover in the agent builder. Empty for user-added tools.
+    help: str = ""
     builtin: bool = False
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
 
@@ -96,33 +99,45 @@ MODEL_PROVIDERS = [
 
 
 def _builtin_tools() -> list[Tool]:
-    """FAERS-oriented tools the agents can call.
+    """Built-in tools the agents can call, backed by real implementations.
 
-    Stable ids match the original frontend so backend calls line up.
+    Ids match the LangGraph tool ``.name`` in ``backend.tools.AGENT_TOOLS`` so
+    the agent runtime can resolve a saved tool id to its tool object.
     """
     return [
+        # Generic database tools (backend/tools/*). Ids match the LangGraph tool
+        # ``.name`` so the agent runtime can resolve them to backend.tools.AGENT_TOOLS.
         Tool(
-            id="search_adverse_events",
-            name="Search Adverse Events",
-            description="Find adverse event reports for a given drug in FAERS.",
+            id="fetch_records_tool",
+            name="Fetch Records",
+            description="Read rows from a table in the application database.",
+            help=(
+                "Read rows from a table of the application database.\n\n"
+                "Args:\n"
+                "  table: Name of an existing table to read from.\n"
+                "  columns: Optional subset of column names to return (default all).\n"
+                "  where: Optional {column: value} equality filters, AND-ed together.\n"
+                "  order_by: Optional column name to sort by.\n"
+                "  descending: Sort descending when True (only with order_by).\n"
+                "  limit: Optional maximum number of rows to return.\n"
+                "  db_schema: Optional schema/namespace the table lives in.\n\n"
+                "Returns: {ok, table, rows, error}."
+            ),
             builtin=True,
         ),
         Tool(
-            id="disproportionality",
-            name="Disproportionality (ROR/PRR)",
-            description="Compute ROR, PRR and chi-square for a drug-event pair.",
-            builtin=True,
-        ),
-        Tool(
-            id="top_events_for_drug",
-            name="Top Events for Drug",
-            description="List the most frequently reported reactions for a drug.",
-            builtin=True,
-        ),
-        Tool(
-            id="report_counts",
-            name="Report Counts",
-            description="Aggregate report counts by age, sex, geography, or quarter.",
+            id="insert_records_tool",
+            name="Insert Records",
+            description="Insert rows into a table in the application database.",
+            help=(
+                "Insert rows into a table of the application database.\n\n"
+                "Args:\n"
+                "  table: Name of an existing table to insert into.\n"
+                "  records: List of rows to insert; each row is an object keyed by\n"
+                "    column name. Keys that don't match a column are ignored.\n"
+                "  db_schema: Optional schema/namespace the table lives in.\n\n"
+                "Returns: {ok, table, inserted, error}."
+            ),
             builtin=True,
         ),
     ]

@@ -68,6 +68,36 @@ def _structured_output_editor(
     return pairs or None
 
 
+def _tools_multiselect(key: str, *, default_ids: list[str]) -> list[str]:
+    """Render a tool picker over the session's available tools.
+
+    Options are every tool from the Tools view (built-ins plus any the user
+    added there). Returns the list of selected tool ids. Unknown ids in
+    ``default_ids`` (e.g. a tool that was since deleted) are silently dropped so
+    the widget doesn't error.
+    """
+    tools = st.session_state.tools
+    if not tools:
+        st.info("No tools available yet. Add some in the **Tools** view.")
+        return []
+
+    by_id = {t.id: t for t in tools}
+    valid_default = [tid for tid in default_ids if tid in by_id]
+    selected = st.multiselect(
+        "Tools the agent can call",
+        options=list(by_id),
+        default=valid_default,
+        format_func=lambda tid: by_id[tid].name,
+        help="Pick the tools this agent is allowed to use. Manage the full "
+        "catalogue in the Tools view.",
+        key=key,
+    )
+    # Show each selected tool's one-line summary (not the full Args/Returns).
+    for tid in selected:
+        st.caption(by_id[tid].description)
+    return selected
+
+
 def render() -> None:
     st.subheader("🤖 Agents")
 
@@ -90,8 +120,8 @@ def _render_add_agent() -> None:
         key="ab_name",
     )
 
-    tab_role, tab_model, tab_knowledge = st.tabs(
-        ["📝 Role", "🧠 Model", "📚 Knowledge Store"]
+    tab_role, tab_model, tab_tools, tab_knowledge = st.tabs(
+        ["📝 Role", "🧠 Model", "🔧 Tools", "📚 Knowledge Store"]
     )
     selected_tools: list[str] = []
 
@@ -161,6 +191,12 @@ def _render_add_agent() -> None:
                 help="Encrypted at rest. Never shown again after saving.",
                 key="ab_api_key",
             )
+
+    # ─── Tools ────────────────────────────────────────────
+    with tab_tools:
+        st.markdown("Choose which tools this agent is allowed to call.")
+        # Start with nothing selected — the user opts each tool in explicitly.
+        selected_tools = _tools_multiselect("ab_tools", default_ids=[])
 
     # ─── Knowledge Store ──────────────────────────────────
     with tab_knowledge:
@@ -408,9 +444,8 @@ def _render_edit_agent(a: dict) -> None:
             key=k + "key",
         )
 
-    # Tool selection is no longer user-editable; preserve the agent's existing
-    # tools across an edit.
-    selected_tools = a.get("tools") or []
+    # ─── Tools ────────────────────────────────────────────
+    selected_tools = _tools_multiselect(k + "tools", default_ids=a.get("tools") or [])
 
     # ─── Knowledge Store ──────────────────────────────────
     ks = a.get("knowledge_store") or {}
