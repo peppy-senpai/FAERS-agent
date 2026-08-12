@@ -13,18 +13,34 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
+import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 
-from . import agent_repo
+from . import agent_repo, ingestion, project_repo, tool_repo, working_db
+from .tools import AGENT_TOOLS, BUILTIN_TOOL_NAMES, custom_loader, fetch_records
 from .python_files.make_python_agent import write_agent_variable
 
-app = FastAPI(title="FAERS Agent API", version="0.1.0")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Load any previously-uploaded custom tools so they survive restarts."""
+    try:
+        custom_loader.discover_all()
+    except Exception as exc:  # noqa: BLE001 - never block startup on a bad tool
+        print(f"Custom tool discovery failed: {exc}")
+    yield
+
+
+app = FastAPI(title="FAERS Agent API", version="0.1.0", lifespan=_lifespan)
 
 # Allow the frontend to talk to FastAPI.
 app.add_middleware(
@@ -80,6 +96,14 @@ class AgentConfig(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     thread_id: str
+
+
+class ProjectPayload(BaseModel):
+    """Mirror of the frontend ``state.Project`` fields we persist."""
+
+    id: str
+    title: str = "New project"
+    agent_id: str | None = None
 
 
 # ─── In-memory agent registry ─────────────────────────────
@@ -177,6 +201,247 @@ async def stream(message: str, thread_id: str):
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# ─── Tool routes ──────────────────────────────────────────
+
+
+def _tool_summary(tool, *, builtin: bool) -> dict:
+    return {
+        "id": tool.name,
+        "name": tool.name,
+        "description": tool.description or "",
+        "builtin": builtin,
+    }
+
+
+@app.get("/tools")
+async def list_tools():
+    """Return all bindable tools: built-ins plus uploaded custom tools."""
+    builtins = [_tool_summary(t, builtin=True) for t in AGENT_TOOLS]
+    customs = [_tool_summary(t, builtin=False) for t in custom_loader.custom_tools()]
+    return {"tools": builtins + customs}
+
+
+@app.post("/tools")
+async def upload_tool(file: UploadFile = File(...)):
+    """Upload a ``.py`` defining LangChain ``@tool`` function(s) and register it.
+
+    The file is validated (must parse and expose at least one tool) before it's
+    kept, and tool names may not shadow a built-in. WARNING: importing the file
+    executes its code in this process — local, trusted use only.
+    """
+    filename = Path(file.filename or "tool.py").name
+    if not filename.endswith(".py"):
+        raise HTTPException(status_code=422, detail="Please upload a .py file.")
+
+    data = await file.read()
+    custom_loader._ensure_dir()
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", filename)
+    if safe in custom_loader.RESERVED:
+        raise HTTPException(
+            status_code=422, detail=f"'{safe}' is a reserved filename."
+        )
+    tmp = custom_loader.TOOLS_DIR / f".tmp_{uuid.uuid4().hex}.py"
+    tmp.write_bytes(data)
+
+    # Validate on the temp copy so a bad upload never overwrites a good file.
+    try:
+        tools = custom_loader.load_tool_file(tmp)
+        clash = {t.name for t in tools} & BUILTIN_TOOL_NAMES
+        if clash:
+            raise ValueError(
+                f"Tool name(s) {sorted(clash)} clash with a built-in tool."
+            )
+    except ValueError as exc:
+        tmp.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    final = custom_loader.TOOLS_DIR / safe
+    tmp.replace(final)
+    try:
+        registered = custom_loader.register_file(final)
+    except ValueError as exc:  # pragma: no cover - already validated above
+        final.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        for t in registered:
+            tool_repo.upsert_tool(t.name, t.description or "", final.name)
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+
+    return {
+        "status": "uploaded",
+        "tools": [_tool_summary(t, builtin=False) for t in registered],
+    }
+
+
+@app.delete("/tools/{name}")
+async def delete_tool(name: str):
+    """Delete a custom tool: unregister, remove its file and DB row."""
+    if name in BUILTIN_TOOL_NAMES:
+        raise HTTPException(status_code=400, detail="Cannot delete a built-in tool.")
+    path = custom_loader.path_for(name)
+    custom_loader.unregister(name)
+    if path:
+        Path(path).unlink(missing_ok=True)
+    try:
+        removed = tool_repo.delete_tool(name)
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+    if not removed and path is None:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    return {"status": "deleted", "name": name}
+
+
+# ─── Project routes ───────────────────────────────────────
+
+
+@app.post("/projects")
+async def create_project(payload: ProjectPayload):
+    """Persist a project (upsert by id)."""
+    try:
+        saved = project_repo.save_project(payload.model_dump())
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+    return {"status": "saved", "project": saved}
+
+
+@app.get("/projects")
+async def list_projects():
+    """Return all persisted projects, newest first."""
+    try:
+        return {"projects": project_repo.list_projects()}
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+
+
+@app.delete("/projects/{project_id}")
+async def delete_project(project_id: str):
+    """Delete a project and drop its working database."""
+    try:
+        existed = project_repo.delete_project(project_id)
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+    if not existed:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"status": "deleted", "id": project_id}
+
+
+@app.get("/projects/{project_id}/tables")
+async def project_tables(project_id: str):
+    """List the tables loaded into a project's working database."""
+    try:
+        return {
+            "working_db_name": working_db.working_db_name(project_id),
+            "tables": working_db.list_tables(project_id),
+        }
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+
+
+@app.get("/projects/{project_id}/files")
+async def project_files(project_id: str):
+    """List the ingest registry (which file became which table)."""
+    try:
+        return {"files": project_repo.list_project_files(project_id)}
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+
+
+@app.get("/projects/{project_id}/tables/{table}/records")
+async def project_table_records(
+    project_id: str,
+    table: str,
+    limit: int = 100,
+    offset: int = 0,
+    order_by: Optional[str] = None,
+    descending: bool = False,
+):
+    """Read a page of rows from a table in the project's working database.
+
+    Paginated so a multi-million-row FAERS table never loads all at once.
+    """
+    result = fetch_records(
+        working_db.working_db_url(project_id),
+        table,
+        order_by=order_by,
+        descending=descending,
+        limit=max(1, min(limit, 5000)),
+        offset=max(0, offset),
+    )
+    if not result.ok:
+        raise HTTPException(status_code=422, detail=result.error or "read failed")
+    return {
+        "table": table,
+        "rows": result.rows,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.post("/projects/{project_id}/files")
+async def upload_project_file(
+    project_id: str,
+    file: UploadFile = File(...),
+    table_name: str = Form(""),
+    mode: str = Form("replace"),
+):
+    """Upload a FAERS file and load it into the project's working database.
+
+    Ensures the ``working_db_<id>`` database exists, parses the bytes with
+    Polars, and bulk-loads them into a table (named after the file unless a
+    ``table_name`` is supplied). Records the outcome in the ingest registry.
+    """
+    filename = file.filename or "upload"
+    target = (table_name.strip() or ingestion.derive_table_name(filename))[:63]
+    data = await file.read()
+
+    # Make sure the project exists so the file registry has a valid owner and
+    # the working-db name is recorded on the project row.
+    try:
+        if project_repo.get_project(project_id) is None:
+            project_repo.save_project({"id": project_id})
+        db_name = working_db.ensure_working_db(project_id)
+        project_repo.save_project({"id": project_id, "working_db_name": db_name})
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+
+    try:
+        df = ingestion.read_any(filename, data)
+        rows = ingestion.load_dataframe(df, project_id, target, mode=mode)
+    except ValueError as exc:
+        # Bad/unsupported input — client error, and record the failure.
+        project_repo.add_project_file(
+            {
+                "id": uuid.uuid4().hex,
+                "project_id": project_id,
+                "original_filename": filename,
+                "table_name": target,
+                "file_format": filename.rsplit(".", 1)[-1].lower(),
+                "row_count": 0,
+                "status": "error",
+                "error": str(exc),
+            }
+        )
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - surface ingest/load failures cleanly
+        raise HTTPException(status_code=500, detail=f"Ingest failed: {exc}") from exc
+
+    record = project_repo.add_project_file(
+        {
+            "id": uuid.uuid4().hex,
+            "project_id": project_id,
+            "original_filename": filename,
+            "table_name": target,
+            "file_format": filename.rsplit(".", 1)[-1].lower(),
+            "row_count": rows,
+            "status": "ok",
+            "error": None,
+        }
+    )
+    return {"status": "loaded", "file": record}
 
 
 @app.get("/signals")

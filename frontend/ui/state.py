@@ -10,8 +10,11 @@ from __future__ import annotations
 import time
 import uuid
 
+import requests
 import streamlit as st
 from pydantic import BaseModel, Field
+
+from . import api
 
 # ─── Domain types ─────────────────────────────────────────
 
@@ -26,6 +29,8 @@ class Message(BaseModel):
 class Project(BaseModel):
     title: str = "New project"
     agent_id: str | None = None
+    # Name of this project's working database, once data has been uploaded.
+    working_db_name: str = ""
     messages: list[Message] = Field(default_factory=list)
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     created_at: float = Field(default_factory=time.time)
@@ -140,6 +145,37 @@ def _builtin_tools() -> list[Tool]:
             ),
             builtin=True,
         ),
+        # Project-data tools: read the current project's working database. The
+        # project is taken from the run context, so there's no project-id arg.
+        Tool(
+            id="list_project_tables",
+            name="List Project Tables",
+            description="List the data tables uploaded into the current project, with row counts.",
+            help=(
+                "List the data tables available in the current project, with row\n"
+                "counts. Use this to discover what FAERS data is available before\n"
+                "querying it.\n\n"
+                "Returns: {ok, tables: [{table, row_count}], error}."
+            ),
+            builtin=True,
+        ),
+        Tool(
+            id="query_project_table",
+            name="Query Project Table",
+            description="Read rows from a table in the current project's database.",
+            help=(
+                "Read rows from a table in the CURRENT project's database.\n\n"
+                "Args:\n"
+                "  table: Name of the table to read (see List Project Tables).\n"
+                "  columns: Optional subset of columns to return (default all).\n"
+                "  where: Optional {column: value} equality filters, AND-ed.\n"
+                "  order_by: Optional column to sort by.\n"
+                "  descending: Sort descending when True (only with order_by).\n"
+                "  limit: Max rows to return (default 100, capped at 5000).\n\n"
+                "Returns: {ok, table, rows, error}."
+            ),
+            builtin=True,
+        ),
     ]
 
 
@@ -162,14 +198,58 @@ def _default_agent() -> Agent:
 # ─── Initialisation ───────────────────────────────────────
 
 
+def _load_projects() -> list["Project"]:
+    """Load persisted projects from the backend; empty list if it's unreachable.
+
+    Message history isn't persisted yet, so reloaded projects start with an
+    empty transcript.
+    """
+    try:
+        rows = api.list_projects()
+    except requests.RequestException:
+        return []
+    return [
+        Project(
+            id=r["id"],
+            title=r.get("title") or "New project",
+            agent_id=r.get("agent_id"),
+            working_db_name=r.get("working_db_name") or "",
+        )
+        for r in rows
+    ]
+
+
+def _custom_tools_from_backend() -> list["Tool"]:
+    """Fetch uploaded custom tools from the backend; empty if unreachable."""
+    try:
+        rows = api.list_tools()
+    except requests.RequestException:
+        return []
+    return [
+        Tool(
+            id=r["id"],
+            name=r["name"],
+            description=r.get("description", ""),
+            builtin=False,
+        )
+        for r in rows
+        if not r.get("builtin")
+    ]
+
+
+def refresh_tools() -> None:
+    """Rebuild the tool list from built-ins + backend custom tools."""
+    st.session_state.tools = _builtin_tools() + _custom_tools_from_backend()
+
+
 def init_state() -> None:
     """Seed st.session_state once per session."""
     ss = st.session_state
     if "initialized" in ss:
         return
-    ss.projects = []  # list[Project]
+    ss.projects = _load_projects()  # list[Project], persisted across sessions
     ss.agents = [_default_agent()]
-    ss.tools = _builtin_tools()
+    ss.tools = _builtin_tools() + _custom_tools_from_backend()
     ss.active_project_id = None
     ss.view = "projects"  # projects | agents | tools | settings
     ss.theme = "light"
@@ -185,6 +265,11 @@ def create_project(agent_id: str | None = None) -> str:
     project = Project(agent_id=agent_id or default_agent)
     ss.projects.insert(0, project)
     ss.active_project_id = project.id
+    # Persist best-effort; degrade to session-only if the backend is down.
+    try:
+        api.create_project(project.id, project.title, project.agent_id)
+    except requests.RequestException:
+        pass
     return project.id
 
 
@@ -193,6 +278,10 @@ def delete_project(project_id: str) -> None:
     ss.projects = [p for p in ss.projects if p.id != project_id]
     if ss.active_project_id == project_id:
         ss.active_project_id = ss.projects[0].id if ss.projects else None
+    try:
+        api.delete_project(project_id)
+    except requests.RequestException:
+        pass
 
 
 def set_active_project(project_id: str | None) -> None:
@@ -218,6 +307,11 @@ def add_message(project_id: str, role: str, content: str) -> str:
         return ""
     if not project.messages and role == "user":
         project.title = content[:40]
+        # Persist the derived title best-effort so it survives a reload.
+        try:
+            api.create_project(project.id, project.title, project.agent_id)
+        except requests.RequestException:
+            pass
     msg = Message(role=role, content=content)
     project.messages.append(msg)
     return msg.id
@@ -259,4 +353,11 @@ def add_tool(name: str, description: str) -> str:
 
 def delete_tool(tool_id: str) -> None:
     ss = st.session_state
+    tool = next((t for t in ss.tools if t.id == tool_id), None)
+    # Custom tools are backed by the server; remove there too (best-effort).
+    if tool is not None and not tool.builtin:
+        try:
+            api.delete_tool(tool.name)
+        except requests.RequestException:
+            pass
     ss.tools = [t for t in ss.tools if t.id != tool_id]

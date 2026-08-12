@@ -40,14 +40,18 @@ from pydantic import BaseModel, Field, create_model
 # ─── Project ──────────────────────────────────────────────
 # AGENT_TOOLS is the registry of bindable tools; the per-tool objects let us
 # resolve a saved tool id (which matches each tool's .name) back to the object.
-from backend.tools import AGENT_TOOLS, fetch_records_tool, insert_records_tool
+from backend.tools import get_agent_tools
 from backend.agent_repo import get_api_key
 
 
 def _selected_tools(tool_ids: list[str]) -> list[BaseTool]:
-    """Resolve saved tool ids to the registered LangChain tool objects."""
+    """Resolve saved tool ids to the registered LangChain tool objects.
+
+    Draws from ``get_agent_tools()`` so uploaded custom tools resolve alongside
+    the built-ins.
+    """
     selected = set(tool_ids)
-    return [tool for tool in AGENT_TOOLS if tool.name in selected]
+    return [tool for tool in get_agent_tools() if tool.name in selected]
 
 
 def _schema_name(agent_id: str) -> str:

@@ -7,7 +7,21 @@
       "Bash(.venv/Scripts/python.exe -m pip install langchain)",
       "Bash(.venv/Scripts/python.exe -c \"from langchain.chat_models import init_chat_model; print\\('init_chat_model OK'\\)\")",
       "Bash(.venv/Scripts/python.exe -c ' *)",
-      "Bash(PYTHONPATH=. .venv/Scripts/python.exe -c ' *)"
+      "Bash(PYTHONPATH=. .venv/Scripts/python.exe -c ' *)",
+      "Bash(./.venv/Scripts/python.exe -c \"import backend.python_files.python_agent\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import backend.python_files.python_agent; print\\('OK: imports cleanly'\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Bash(env)",
+      "Bash(./.venv/Scripts/python.exe -c \"import backend.main; print\\('backend OK'\\)\")",
+      "Bash(../.venv/Scripts/python.exe -c ' *)",
+      "Bash(../.venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0,'.'\\); from ui.views import project; print\\('frontend OK'\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import backend.main; print\\('backend imports OK'\\)\")",
+      "Bash(../.venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0,'.'\\); from ui.views import tools; from ui import api, state; assert hasattr\\(api,'upload_tool'\\) and hasattr\\(state,'refresh_tools'\\); print\\('frontend imports OK'\\)\")",
+      "Bash(mv custom/ingest_faers_quarter.py ./ingest_faers_quarter.py)",
+      "Bash(rmdir custom *)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\prade\\.claude\\projects\\c--Users-prade-OneDrive-Documents-Code-FAERS-agent\\memory"
     ]
   }
 }

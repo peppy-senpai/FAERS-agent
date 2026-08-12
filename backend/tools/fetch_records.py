@@ -44,6 +44,7 @@ def fetch_records(
     order_by: str | None = None,
     descending: bool = False,
     limit: int | None = None,
+    offset: int | None = None,
     schema: str | None = None,
 ) -> FetchResult:
     """Read rows from ``table`` of the database at ``db_url``.
@@ -57,6 +58,7 @@ def fetch_records(
         order_by: Optional column name to sort by.
         descending: Sort descending when True (only used with ``order_by``).
         limit: Optional maximum number of rows to return.
+        offset: Optional number of leading rows to skip (for pagination).
         schema: Optional schema/namespace the table lives in.
 
     Returns:
@@ -87,6 +89,9 @@ def fetch_records(
 
         if limit is not None:
             stmt = stmt.limit(limit)
+
+        if offset is not None:
+            stmt = stmt.offset(offset)
 
         with engine.connect() as conn:
             result = conn.execute(stmt)

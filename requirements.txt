@@ -19,6 +19,16 @@ pypdf
 beautifulsoup4
 charset-normalizer
 numpy
+# Per-project FAERS data ingestion (backend/ingestion.py). Polars parses the
+# uploaded files; write_database(engine="adbc") bulk-loads them into each
+# project's working_db_<id> Postgres database over Arrow (fast, no pandas
+# round-trip). fastexcel is Polars' .xlsx reader engine. pyarrow is already a
+# transitive dep but adbc needs it explicitly.
+polars
+adbc-driver-postgresql
+adbc-driver-manager
+pyarrow
+fastexcel
 # Vector store + local embeddings for RAG, semantic memory, and tool
 # selection. Used on core agent paths, so installed by default — the app
 # still degrades to keyword fallback if they're ever missing.

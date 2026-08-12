@@ -25,6 +25,10 @@ def db_url() -> URL:
     the standard ``PG*`` env vars. Built with ``URL.create`` so passwords with
     special characters (``@``, ``:``, …) are escaped correctly rather than
     breaking URL parsing.
+
+    If ``PGPASSWORD`` is not set, the password is left off the URL so libpq
+    falls back to its own resolution — notably ``pgpass.conf`` — instead of a
+    wrong hardcoded default. This matches how ``psql`` authenticates.
     """
     override = os.environ.get("FAERS_DB_URL")
     if override:
@@ -32,7 +36,7 @@ def db_url() -> URL:
     return URL.create(
         "postgresql+psycopg",
         username=os.environ.get("PGUSER", "postgres"),
-        password=os.environ.get("PGPASSWORD", "postgres"),
+        password=os.environ.get("PGPASSWORD"),  # None → libpq uses pgpass.conf
         host=os.environ.get("PGHOST", "localhost"),
         port=int(os.environ.get("PGPORT", "5432")),
         database=DB_NAME,

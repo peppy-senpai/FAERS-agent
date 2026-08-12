@@ -10,18 +10,46 @@ agents bind:
 
 from __future__ import annotations
 
+from langchain_core.tools import BaseTool
+
+from .custom_loader import custom_tools
 from .fetch_records import FetchResult, fetch_records, fetch_records_tool
 from .insert_records import InsertResult, insert_records, insert_records_tool
+from .project_data import list_project_tables, query_project_table
 
-# Tools agents can bind, in one place for registration.
-AGENT_TOOLS = [insert_records_tool, fetch_records_tool]
+# Built-in tools, always available. Custom (uploaded) tools are added on top by
+# get_agent_tools() at call time.
+AGENT_TOOLS = [
+    insert_records_tool,
+    fetch_records_tool,
+    list_project_tables,
+    query_project_table,
+]
+
+# Names reserved by built-ins; a custom upload can't shadow these.
+BUILTIN_TOOL_NAMES = {tool.name for tool in AGENT_TOOLS}
+
+
+def get_agent_tools() -> list[BaseTool]:
+    """All bindable tools: built-ins plus any uploaded custom tools.
+
+    Resolved dynamically so tools uploaded at runtime are visible without a
+    restart. The agent factory resolves saved tool ids against this list.
+    """
+    return [*AGENT_TOOLS, *custom_tools()]
+
 
 __all__ = [
     "AGENT_TOOLS",
+    "BUILTIN_TOOL_NAMES",
     "FetchResult",
     "InsertResult",
+    "custom_tools",
     "fetch_records",
     "fetch_records_tool",
+    "get_agent_tools",
     "insert_records",
     "insert_records_tool",
+    "list_project_tables",
+    "query_project_table",
 ]

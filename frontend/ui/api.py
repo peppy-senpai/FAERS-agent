@@ -112,6 +112,125 @@ def stream_message(
             yield line
 
 
+# ─── Tool API calls ───────────────────────────────────────
+
+
+def list_tools(timeout: float = 10.0) -> list[dict]:
+    """Fetch all bindable tools (built-ins + uploaded custom tools)."""
+    resp = requests.get(f"{base_url()}/tools", timeout=timeout)
+    resp.raise_for_status()
+    return resp.json().get("tools", [])
+
+
+def upload_tool(filename: str, data: bytes, timeout: float = 30.0) -> dict:
+    """Upload a ``.py`` tool file; the backend validates and registers it."""
+    resp = requests.post(
+        f"{base_url()}/tools",
+        files={"file": (filename, data, "text/x-python")},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def delete_tool(name: str, timeout: float = 10.0) -> dict:
+    """Delete a custom tool by name."""
+    resp = requests.delete(f"{base_url()}/tools/{name}", timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ─── Project + file-upload API calls ──────────────────────
+
+
+def create_project(
+    project_id: str,
+    title: str,
+    agent_id: str | None = None,
+    timeout: float = 10.0,
+) -> dict:
+    """Persist a project (upsert by id)."""
+    resp = requests.post(
+        f"{base_url()}/projects",
+        json={"id": project_id, "title": title, "agent_id": agent_id},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def list_projects(timeout: float = 10.0) -> list[dict]:
+    """Fetch all persisted projects, newest first."""
+    resp = requests.get(f"{base_url()}/projects", timeout=timeout)
+    resp.raise_for_status()
+    return resp.json().get("projects", [])
+
+
+def delete_project(project_id: str, timeout: float = 10.0) -> dict:
+    """Delete a project and drop its working database."""
+    resp = requests.delete(f"{base_url()}/projects/{project_id}", timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def list_project_tables(project_id: str, timeout: float = 10.0) -> dict:
+    """Return the working-db name and its loaded tables (with row counts)."""
+    resp = requests.get(
+        f"{base_url()}/projects/{project_id}/tables", timeout=timeout
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_project_records(
+    project_id: str,
+    table: str,
+    limit: int = 100,
+    offset: int = 0,
+    order_by: str | None = None,
+    descending: bool = False,
+    timeout: float = 60.0,
+) -> dict:
+    """Read a page of rows from a table in the project's working database."""
+    params: dict[str, object] = {
+        "limit": limit,
+        "offset": offset,
+        "descending": descending,
+    }
+    if order_by:
+        params["order_by"] = order_by
+    resp = requests.get(
+        f"{base_url()}/projects/{project_id}/tables/{table}/records",
+        params=params,
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def upload_file(
+    project_id: str,
+    filename: str,
+    data: bytes,
+    table_name: str = "",
+    mode: str = "replace",
+    timeout: float = 300.0,
+) -> dict:
+    """Upload a file and load it into the project's working database.
+
+    ``data`` is the raw file bytes (e.g. Streamlit's ``UploadedFile.getvalue()``).
+    A longer timeout accommodates large FAERS quarterly files.
+    """
+    resp = requests.post(
+        f"{base_url()}/projects/{project_id}/files",
+        files={"file": (filename, data)},
+        data={"table_name": table_name, "mode": mode},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 # ─── Signal detection API calls ───────────────────────────
 
 
