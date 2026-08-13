@@ -56,6 +56,41 @@ def _agent_block(config: dict[str, Any]) -> str:
     )
 
 
+def _graph_markers(agent_id: str) -> tuple[str, str]:
+    return (
+        f"# <generated-graph id={agent_id}>",
+        f"# </generated-graph id={agent_id}>",
+    )
+
+
+def write_graph_builder(agent_id: str, code: str) -> str:
+    """Create or replace a generated ``build_agent_<id>()`` function in the file.
+
+    Same marker-based find/replace as :func:`write_agent_variable`, but for a
+    whole graph-builder function emitted by :mod:`backend.graph_compiler`.
+    """
+    agent_id = str(agent_id or "").strip()
+    if not agent_id:
+        raise ValueError("Graph config must include an id before code generation.")
+
+    source = PYTHON_AGENT_FILE.read_text(encoding="utf-8")
+    start, end = _graph_markers(agent_id)
+    block = f"{start}\n{code.rstrip()}\n{end}\n"
+    pattern = re.compile(
+        rf"\n?{re.escape(start)}\n.*?\n{re.escape(end)}\n?",
+        flags=re.DOTALL,
+    )
+    if pattern.search(source):
+        source = pattern.sub(f"\n{block}", source)
+    else:
+        if _GENERATED_HEADER not in source:
+            source = source.rstrip() + f"\n\n{_GENERATED_HEADER}\n"
+        source = source.rstrip() + f"\n\n{block}"
+
+    PYTHON_AGENT_FILE.write_text(source, encoding="utf-8")
+    return agent_id
+
+
 def write_agent_variable(config: dict[str, Any]) -> str:
     """Create or replace ``agent_<agent_id> = create_agent(...)`` in the file."""
     agent_id = str(config.get("id") or "").strip()

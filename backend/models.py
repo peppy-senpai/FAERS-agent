@@ -36,6 +36,9 @@ class AgentConfig(Base):
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # Optional structured-output spec: {field_name: description}. NULL = free text.
     structured_output: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Optional visual node-graph spec ({nodes, edges}) when the agent was built
+    # in the graph canvas. NULL for form-built agents.
+    graph: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     tools: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     knowledge_store: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     memory_enabled: Mapped[bool] = mapped_column(

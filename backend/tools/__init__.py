@@ -13,6 +13,7 @@ from __future__ import annotations
 from langchain_core.tools import BaseTool
 
 from .custom_loader import custom_tools
+from .disproportionality import reporting_odds_ratio
 from .fetch_records import FetchResult, fetch_records, fetch_records_tool
 from .insert_records import InsertResult, insert_records, insert_records_tool
 from .project_data import list_project_tables, query_project_table
@@ -24,6 +25,7 @@ AGENT_TOOLS = [
     fetch_records_tool,
     list_project_tables,
     query_project_table,
+    reporting_odds_ratio,
 ]
 
 # Names reserved by built-ins; a custom upload can't shadow these.
@@ -52,4 +54,5 @@ __all__ = [
     "insert_records_tool",
     "list_project_tables",
     "query_project_table",
+    "reporting_odds_ratio",
 ]

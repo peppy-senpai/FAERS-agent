@@ -98,6 +98,15 @@ class ChatRequest(BaseModel):
     thread_id: str
 
 
+class GraphPayload(BaseModel):
+    """A visual graph saved from the node canvas."""
+
+    id: str
+    name: str
+    graph: dict  # {nodes, edges}
+    memory_enabled: bool = True
+
+
 class ProjectPayload(BaseModel):
     """Mirror of the frontend ``state.Project`` fields we persist."""
 
@@ -153,6 +162,56 @@ async def create_agent(config: AgentConfig):
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Agent file error: {exc}") from exc
     return {"status": "created", "agent": saved, "agent_variable": agent_variable}
+
+
+@app.post("/agent/graph")
+async def create_graph_agent(payload: GraphPayload):
+    """Compile a visual graph into LangGraph code, persist it, and register it.
+
+    The graph spec is compiled to a ``build_agent_<id>()`` StateGraph builder,
+    written into python_agent.py, and the spec is saved on the agent row. The
+    generated builder is executed later (with the LangGraph runtime) to run the
+    orchestrated agent.
+    """
+    from .graph_compiler import compile_graph
+    from .python_files.make_python_agent import write_graph_builder
+
+    try:
+        code = compile_graph(
+            payload.id, payload.graph, memory_enabled=payload.memory_enabled
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    try:
+        compile(code, "<generated-graph>", "exec")  # catch any codegen bug
+    except SyntaxError as exc:  # pragma: no cover - compiler invariant
+        raise HTTPException(status_code=500, detail=f"Codegen error: {exc}") from exc
+
+    tool_ids = sorted(
+        {
+            (n.get("data") or {}).get("tool_id")
+            for n in payload.graph.get("nodes", [])
+            if n.get("type") == "tool" and (n.get("data") or {}).get("tool_id")
+        }
+    )
+    try:
+        write_graph_builder(payload.id, code)
+        saved = agent_repo.save_agent(
+            {
+                "id": payload.id,
+                "name": payload.name,
+                "model": "",  # graph agents carry per-node models, not one top-level
+                "graph": payload.graph,
+                "tools": tool_ids,
+            }
+        )
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail=f"DB error: {exc}") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Agent file error: {exc}") from exc
+
+    return {"status": "created", "agent": saved, "code": code}
 
 
 @app.get("/agents")

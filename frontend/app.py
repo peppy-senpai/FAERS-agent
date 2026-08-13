@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ui import state
+from ui import barfi_theme, state
 from ui.views import agent_builder, project, settings, tools
 
 st.set_page_config(page_title="FAERS Agent", page_icon="📊", layout="wide")
+
+# Darken the barfi graph canvas (minimap + zoom controls) — idempotent.
+barfi_theme.ensure_dark_canvas()
 
 state.init_state()
 

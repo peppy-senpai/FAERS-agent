@@ -13,10 +13,21 @@ appear.
 
 from __future__ import annotations
 
+import uuid
+
 import requests
 import streamlit as st
+from barfi.flow.streamlit import st_flow
 
-from .. import api, state
+from .. import api, graph_blocks, state
+
+
+def _http_error_detail(exc: requests.HTTPError) -> str:
+    """Pull the FastAPI ``detail`` message out of an error response."""
+    try:
+        return exc.response.json().get("detail", str(exc))
+    except (ValueError, AttributeError):
+        return str(exc)
 
 
 def _structured_output_editor(
@@ -112,187 +123,59 @@ def render() -> None:
 
 
 def _render_add_agent() -> None:
-    st.caption("Configure an agent and the FAERS tools it can use.")
-
-    name = st.text_input(
-        "Agent name",
-        placeholder="Enter agent name",
-        key="ab_name",
+    st.caption(
+        "Drag blocks onto the canvas and wire them into an orchestrated agent "
+        "graph, then Save to compile it to LangGraph code."
     )
 
-    tab_role, tab_model, tab_tools, tab_knowledge = st.tabs(
-        ["📝 Role", "🧠 Model", "🔧 Tools", "📚 Knowledge Store"]
+    name = st.text_input("Agent name", placeholder="Enter agent name", key="ab_name")
+    st.caption(
+        "Wire **Input → Agent(s) → Output**. Connect **Tool** blocks into an "
+        "agent's *tools* socket; use a **Supervisor** to route between agents."
     )
-    selected_tools: list[str] = []
 
-    # ─── Role ─────────────────────────────────────────────
-    with tab_role:
-        st.markdown("Describe what this agent does and how it should behave.")
-        system_prompt = st.text_area(
-            "System prompt",
-            placeholder="Enter prompt describing role of agent",
-            height=180,
-            key="ab_system_prompt",
+    # Stable id for this draft graph across reruns.
+    graph_id = st.session_state.setdefault("ab_graph_id", uuid.uuid4().hex)
+
+    blocks = graph_blocks.build_blocks(st.session_state.tools)
+    response = st_flow(blocks, commands=["save"], key="ab_flow")
+
+    with st.expander("ℹ️ What each block does", expanded=False):
+        st.markdown(
+            "- **Input** — entry point; the user's message enters the graph here.\n"
+            "- **Agent** — an LLM agent. Set its *model* and *system prompt*; wire "
+            "**Tool** blocks into its **tools** socket.\n"
+            "- **Tool** — pick a tool from the dropdown for an agent to call. "
+            "Connect its output to an Agent's **tools** input. Drop one Tool block "
+            "per tool.\n"
+            "- **Supervisor** — orchestrates multiple agents: it decides which "
+            "agent acts next (or finishes). Wire it to the agents it manages.\n"
+            "- **Output** — exit point; the final answer leaves the graph here.\n\n"
+            "**Typical wiring:** Input → Agent(s) → Output. For multi-agent "
+            "routing, use Input → Supervisor → several Agents."
         )
-        col_a, col_b = st.columns(2)
-        memory_enabled = col_a.checkbox("Memory", value=True, key="ab_memory")
-        human_in_loop = col_b.checkbox(
-            "Human in the loop", value=False, key="ab_hitl"
-        )
 
-        structured_output = _structured_output_editor(
-            "ab_", enabled_default=False, default_value=None
-        )
+    if response.command != "save":
+        return
+    if not name.strip():
+        st.error("Agent name is required.")
+        return
 
-    # ─── Model ────────────────────────────────────────────
-    with tab_model:
-        model_source = st.radio(
-            "Model source",
-            ["Local model", "Online API"],
-            horizontal=True,
-            key="ab_model_source",
-        )
-        if model_source == "Local model":
-            model_url = st.text_input(
-                "Local URL",
-                placeholder="http://localhost:11434",
-                help="URL of the local model server (e.g. Ollama, LM Studio).",
-                key="ab_local_url",
-            )
-            model = st.text_input(
-                "Model",
-                placeholder="llama3",
-                key="ab_local_model",
-            )
-            provider = ""
-            api_key = ""
-        else:
-            provider = st.selectbox(
-                "Provider",
-                state.MODEL_PROVIDERS,
-                index=0,
-                help="LangChain/LangGraph chat-model provider wrapper.",
-                key="ab_provider",
-            )
-            model_url = st.text_input(
-                "Base URL",
-                placeholder="https://api.openai.com/v1",
-                key="ab_model_url",
-            )
-            model = st.text_input(
-                "Model",
-                placeholder="gpt-4o-mini",
-                key="ab_model_name",
-            )
-            api_key = st.text_input(
-                "API key",
-                type="password",
-                placeholder="sk-…",
-                help="Encrypted at rest. Never shown again after saving.",
-                key="ab_api_key",
-            )
+    spec = graph_blocks.normalize(response.editor_schema)
+    try:
+        result = api.save_graph_agent(graph_id, name.strip(), spec)
+    except requests.HTTPError as exc:
+        st.error(f"Compile failed: {_http_error_detail(exc)}")
+        return
+    except requests.RequestException as exc:
+        st.error(f"Backend unavailable: {exc}")
+        return
 
-    # ─── Tools ────────────────────────────────────────────
-    with tab_tools:
-        st.markdown("Choose which tools this agent is allowed to call.")
-        # Start with nothing selected — the user opts each tool in explicitly.
-        selected_tools = _tools_multiselect("ab_tools", default_ids=[])
-
-    # ─── Knowledge Store ──────────────────────────────────
-    with tab_knowledge:
-        store_choice = st.radio(
-            "Vector storage",
-            ["Local database", "Cloud database"],
-            horizontal=True,
-            key="ab_store_choice",
-        )
-        if store_choice == "Local database":
-            location = st.text_input(
-                "Local store path",
-                placeholder="./data/chroma",
-                key="ab_store_local_path",
-            )
-        else:
-            location = st.text_input(
-                "Connection URL",
-                placeholder="https://my-index.pinecone.io",
-                key="ab_store_cloud_url",
-            )
-
-        uploads = st.file_uploader(
-            "Upload local files to index",
-            accept_multiple_files=True,
-            type=["pdf", "txt", "csv", "md", "json", "py"],
-            key="ab_store_files",
-        )
-        uploaded_names = [f.name for f in uploads] if uploads else []
-        if uploaded_names:
-            st.caption(f"{len(uploaded_names)} file(s): " + ", ".join(uploaded_names))
-
-    # ─── Submit ───────────────────────────────────────────
-    st.divider()
-    if st.button("Create agent", type="primary"):
-        if not name.strip():
-            st.error("Agent name is required.")
-            return
-        if not model.strip():
-            st.error("Model is required — enter the model name in the Model tab.")
-            return
-        if not model_url.strip():
-            url_label = "Local URL" if model_source == "Local model" else "Base URL"
-            st.error(f"{url_label} is required — set it in the Model tab.")
-            return
-
-        store_type = "local" if store_choice == "Local database" else "cloud"
-        knowledge_store = state.KnowledgeStore(
-            store_type=store_type,
-            location=location.strip(),
-            files=uploaded_names,
-        )
-        model_src = "local" if model_source == "Local model" else "api"
-
-        new_agent = state.Agent(
-            name=name.strip(),
-            model=model,
-            model_source=model_src,
-            provider=provider,
-            model_url=model_url.strip(),
-            api_key=api_key,
-            system_prompt=system_prompt,
-            structured_output=structured_output,
-            tools=selected_tools,
-            knowledge_store=knowledge_store,
-            memory_enabled=memory_enabled,
-            human_in_loop=human_in_loop,
-        )
-        state.add_agent(new_agent)
-
-        # Persist to the backend database. Surface failures so the user knows
-        # whether the agent was actually saved.
-        try:
-            api.create_agent(
-                api.AgentConfig(
-                    id=new_agent.id,
-                    agent_name=new_agent.name,
-                    model=model,
-                    model_source=model_src,
-                    provider=provider,
-                    model_url=model_url.strip(),
-                    api_key=api_key,
-                    tools=selected_tools,
-                    system_prompt=system_prompt,
-                    structured_output=structured_output,
-                    knowledge_store=knowledge_store.model_dump(),
-                    memory_enabled=memory_enabled,
-                    human_in_loop=human_in_loop,
-                )
-            )
-            st.success(f"Created agent “{new_agent.name}”. See the My agents tab.")
-        except requests.RequestException:
-            st.warning(
-                f"Created “{new_agent.name}” locally, but the backend was "
-                "unavailable so it wasn't saved to the database."
-            )
+    st.success(f"Compiled and saved “{name.strip()}”. See the My agents tab.")
+    with st.expander("Generated LangGraph code", expanded=True):
+        st.code(result.get("code", ""), language="python")
+    # Fresh id for the next graph.
+    st.session_state["ab_graph_id"] = uuid.uuid4().hex
 
 
 # ─── My agents ────────────────────────────────────────────

@@ -59,6 +59,28 @@ def create_agent(config: AgentConfig, timeout: float = 10.0) -> dict:
     return resp.json()
 
 
+def save_graph_agent(
+    agent_id: str,
+    name: str,
+    graph: dict,
+    memory_enabled: bool = True,
+    timeout: float = 30.0,
+) -> dict:
+    """Compile + persist a visual graph agent. Returns {status, agent, code}."""
+    resp = requests.post(
+        f"{base_url()}/agent/graph",
+        json={
+            "id": agent_id,
+            "name": name,
+            "graph": graph,
+            "memory_enabled": memory_enabled,
+        },
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 def list_agents(timeout: float = 10.0) -> list[dict]:
     """Fetch all agents saved in the backend database, newest first."""
     resp = requests.get(f"{base_url()}/agents", timeout=timeout)

@@ -34,6 +34,7 @@ TOOLS_DIR = Path(os.environ.get("FAERS_TOOLS_DIR", Path(__file__).parent))
 RESERVED = {
     "__init__.py",
     "custom_loader.py",
+    "disproportionality.py",
     "fetch_records.py",
     "insert_records.py",
     "project_data.py",

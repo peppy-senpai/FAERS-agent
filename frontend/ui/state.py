@@ -176,6 +176,25 @@ def _builtin_tools() -> list[Tool]:
             ),
             builtin=True,
         ),
+        Tool(
+            id="reporting_odds_ratio",
+            name="Reporting Odds Ratio (ROR)",
+            description="Compute the ROR disproportionality signal for a drug/event pair.",
+            help=(
+                "Compute the Reporting Odds Ratio (ROR) for a drug / adverse-event\n"
+                "pair from a table in the CURRENT project's database. Returns the\n"
+                "2x2 counts, ROR, 95% CI, and a signal flag.\n\n"
+                "Args:\n"
+                "  drug: Drug name to test.\n"
+                "  event: Adverse-event term to test.\n"
+                "  table: Table with one row per report/drug/reaction.\n"
+                "  drug_col: Drug-name column (default 'drugname').\n"
+                "  event_col: Reaction/event column (default 'pt').\n"
+                "  id_col: Unique report/case id column (default 'primaryid').\n\n"
+                "Returns: {ok, counts:{a,b,c,d,n}, ror, ci_lower, ci_upper, signal}."
+            ),
+            builtin=True,
+        ),
     ]
 
 
