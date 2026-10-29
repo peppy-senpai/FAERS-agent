@@ -1,0 +1,276 @@
+"""HTTP client for the FastAPI backend.
+
+Python port of the original frontend/src/services/api.ts. Each function maps
+1:1 to an endpoint the React app used.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import asdict, dataclass, field
+from typing import Callable, Iterator
+
+import requests
+
+
+def base_url() -> str:
+    """Base URL of the FastAPI backend.
+
+    Overridable with the FAERS_API_URL env var so the same code works in
+    dev and deployed setups.
+    """
+    return os.environ.get("FAERS_API_URL", "http://localhost:8000").rstrip("/")
+
+
+# ─── Types ────────────────────────────────────────────────
+
+
+@dataclass
+class AgentConfig:
+    """What the user configures in the Agent Builder form."""
+
+    agent_name: str
+    model: str
+    tools: list[str]
+    system_prompt: str
+    memory_enabled: bool
+    human_in_loop: bool
+    id: str | None = None  # reuse the frontend agent id as the DB primary key
+    model_source: str = "local"  # local | api
+    provider: str = ""  # langchain provider when model_source == "api"
+    model_url: str = ""  # base URL when model_source == "api"
+    api_key: str = ""  # credential when model_source == "api"
+    structured_output: dict | None = None  # {field: description} or None
+    knowledge_store: dict = field(default_factory=dict)
+
+
+# ─── Agent API calls ──────────────────────────────────────
+
+
+def create_agent(config: AgentConfig, timeout: float = 10.0) -> dict:
+    """Send agent config to FastAPI to build the LangGraph agent."""
+    resp = requests.post(
+        f"{base_url()}/agent/create",
+        json=asdict(config),
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def save_graph_agent(
+    agent_id: str,
+    name: str,
+    graph: dict,
+    memory_enabled: bool = True,
+    timeout: float = 30.0,
+) -> dict:
+    """Compile + persist a visual graph agent. Returns {status, agent, code}."""
+    resp = requests.post(
+        f"{base_url()}/agent/graph",
+        json={
+            "id": agent_id,
+            "name": name,
+            "graph": graph,
+            "memory_enabled": memory_enabled,
+        },
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def list_agents(timeout: float = 10.0) -> list[dict]:
+    """Fetch all agents saved in the backend database, newest first."""
+    resp = requests.get(f"{base_url()}/agents", timeout=timeout)
+    resp.raise_for_status()
+    return resp.json().get("agents", [])
+
+
+def delete_agent(agent_id: str, timeout: float = 10.0) -> dict:
+    """Delete an agent from the backend database by id."""
+    resp = requests.delete(f"{base_url()}/agents/{agent_id}", timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def send_message(message: str, thread_id: str, timeout: float = 120.0) -> dict:
+    """Send a chat message and get a (non-streamed) response."""
+    resp = requests.post(
+        f"{base_url()}/agent/chat",
+        json={"message": message, "thread_id": thread_id},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ─── Streaming API call ───────────────────────────────────
+
+
+def stream_message(
+    message: str,
+    thread_id: str,
+    timeout: float = 120.0,
+) -> Iterator[str]:
+    """Stream LLM tokens back in real time over SSE.
+
+    Yields each token as it arrives and stops on the "[DONE]" sentinel.
+    Mirrors the EventSource logic from the React app, but as a generator so
+    it plugs straight into Streamlit's st.write_stream().
+    """
+    url = f"{base_url()}/agent/stream"
+    params = {"message": message, "thread_id": thread_id}
+    with requests.get(url, params=params, stream=True, timeout=timeout) as resp:
+        resp.raise_for_status()
+        for raw in resp.iter_lines(decode_unicode=True):
+            if not raw:
+                continue
+            # SSE lines look like "data: <token>"
+            line = raw[5:].lstrip() if raw.startswith("data:") else raw
+            if line == "[DONE]":
+                return
+            yield line
+
+
+# ─── Tool API calls ───────────────────────────────────────
+
+
+def list_tools(timeout: float = 10.0) -> list[dict]:
+    """Fetch all bindable tools (built-ins + uploaded custom tools)."""
+    resp = requests.get(f"{base_url()}/tools", timeout=timeout)
+    resp.raise_for_status()
+    return resp.json().get("tools", [])
+
+
+def upload_tool(filename: str, data: bytes, timeout: float = 30.0) -> dict:
+    """Upload a ``.py`` tool file; the backend validates and registers it."""
+    resp = requests.post(
+        f"{base_url()}/tools",
+        files={"file": (filename, data, "text/x-python")},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def delete_tool(name: str, timeout: float = 10.0) -> dict:
+    """Delete a custom tool by name."""
+    resp = requests.delete(f"{base_url()}/tools/{name}", timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ─── Project + file-upload API calls ──────────────────────
+
+
+def create_project(
+    project_id: str,
+    title: str,
+    agent_id: str | None = None,
+    timeout: float = 10.0,
+) -> dict:
+    """Persist a project (upsert by id)."""
+    resp = requests.post(
+        f"{base_url()}/projects",
+        json={"id": project_id, "title": title, "agent_id": agent_id},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def list_projects(timeout: float = 10.0) -> list[dict]:
+    """Fetch all persisted projects, newest first."""
+    resp = requests.get(f"{base_url()}/projects", timeout=timeout)
+    resp.raise_for_status()
+    return resp.json().get("projects", [])
+
+
+def delete_project(project_id: str, timeout: float = 10.0) -> dict:
+    """Delete a project and drop its working database."""
+    resp = requests.delete(f"{base_url()}/projects/{project_id}", timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def list_project_tables(project_id: str, timeout: float = 10.0) -> dict:
+    """Return the working-db name and its loaded tables (with row counts)."""
+    resp = requests.get(
+        f"{base_url()}/projects/{project_id}/tables", timeout=timeout
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def get_project_records(
+    project_id: str,
+    table: str,
+    limit: int = 100,
+    offset: int = 0,
+    order_by: str | None = None,
+    descending: bool = False,
+    timeout: float = 60.0,
+) -> dict:
+    """Read a page of rows from a table in the project's working database."""
+    params: dict[str, object] = {
+        "limit": limit,
+        "offset": offset,
+        "descending": descending,
+    }
+    if order_by:
+        params["order_by"] = order_by
+    resp = requests.get(
+        f"{base_url()}/projects/{project_id}/tables/{table}/records",
+        params=params,
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def upload_file(
+    project_id: str,
+    filename: str,
+    data: bytes,
+    table_name: str = "",
+    mode: str = "replace",
+    timeout: float = 300.0,
+) -> dict:
+    """Upload a file and load it into the project's working database.
+
+    ``data`` is the raw file bytes (e.g. Streamlit's ``UploadedFile.getvalue()``).
+    A longer timeout accommodates large FAERS quarterly files.
+    """
+    resp = requests.post(
+        f"{base_url()}/projects/{project_id}/files",
+        files={"file": (filename, data)},
+        data={"table_name": table_name, "mode": mode},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ─── Signal detection API calls ───────────────────────────
+
+
+def get_signal_data(drug: str, event: str, timeout: float = 30.0) -> dict:
+    """Fetch disproportionality analysis results for the dashboard."""
+    resp = requests.get(
+        f"{base_url()}/signals",
+        params={"drug": drug, "event": event},
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def health() -> bool:
+    """Return True if the backend /health endpoint responds ok."""
+    try:
+        resp = requests.get(f"{base_url()}/health", timeout=3.0)
+        return resp.ok and resp.json().get("status") == "ok"
+    except (requests.RequestException, json.JSONDecodeError, ValueError):
+        return False
